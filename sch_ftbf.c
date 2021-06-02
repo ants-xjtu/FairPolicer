@@ -380,7 +380,8 @@ static int ftbf_enqueue(struct sk_buff *skb, struct Qdisc *sch,
     }
 
     if (qdisc_pkt_len(skb) > q->max_size) {
-        if (skb_is_gso(skb) && skb_gso_mac_seglen(skb) <= q->max_size)
+        if (skb_is_gso(skb) &&
+            skb_gso_validate_mac_len(skb, q->max_size))
             return ftbf_segment(skb, sch, to_free);
         return qdisc_drop(skb, sch, to_free);
     }
@@ -439,7 +440,8 @@ static const struct nla_policy ftbf_policy[TCA_FTBF_MAX + 1] = {
     [TCA_FTBF_PBURST] = { .type = NLA_U32 },
 };
 
-static int ftbf_change(struct Qdisc *sch, struct nlattr *opt)
+static int ftbf_change(struct Qdisc *sch, struct nlattr *opt,
+              struct netlink_ext_ack *extack)
 {
     int err;
     struct ftbf_sched_data *q = qdisc_priv(sch);
@@ -452,7 +454,8 @@ static int ftbf_change(struct Qdisc *sch, struct nlattr *opt)
     s64 buffer, mtu;
     u64 rate64 = 0, prate64 = 0;
 
-    err = nla_parse_nested(tb, TCA_FTBF_MAX, opt, ftbf_policy, NULL);
+    err = nla_parse_nested_deprecated(tb, TCA_FTBF_MAX, opt, ftbf_policy,
+                      NULL);
     if (err < 0)
         return err;
 
@@ -463,11 +466,13 @@ static int ftbf_change(struct Qdisc *sch, struct nlattr *opt)
     qopt = nla_data(tb[TCA_FTBF_PARMS]);
     if (qopt->rate.linklayer == TC_LINKLAYER_UNAWARE)
         qdisc_put_rtab(qdisc_get_rtab(&qopt->rate,
-                          tb[TCA_FTBF_RTAB]));
+                          tb[TCA_FTBF_RTAB],
+                          NULL));
 
     if (qopt->peakrate.linklayer == TC_LINKLAYER_UNAWARE)
             qdisc_put_rtab(qdisc_get_rtab(&qopt->peakrate,
-                              tb[TCA_FTBF_PTAB]));
+                              tb[TCA_FTBF_PTAB],
+                              NULL));
 
     buffer = min_t(u64, PSCHED_TICKS2NS(qopt->buffer), ~0U);
     mtu = min_t(u64, PSCHED_TICKS2NS(qopt->mtu), ~0U);
@@ -520,7 +525,8 @@ static int ftbf_change(struct Qdisc *sch, struct nlattr *opt)
         if (err)
             goto done;
     } else if (qopt->limit > 0) {
-        child = fifo_create_dflt(sch, &bfifo_qdisc_ops, qopt->limit);
+        child = fifo_create_dflt(sch, &bfifo_qdisc_ops, qopt->limit,
+                     extack);
         if (IS_ERR(child)) {
             err = PTR_ERR(child);
             goto done;
@@ -532,9 +538,8 @@ static int ftbf_change(struct Qdisc *sch, struct nlattr *opt)
 
     sch_tree_lock(sch);
     if (child) {
-        qdisc_tree_reduce_backlog(q->qdisc, q->qdisc->q.qlen,
-                      q->qdisc->qstats.backlog);
-        qdisc_destroy(q->qdisc);
+        qdisc_tree_flush_backlog(q->qdisc);
+        qdisc_put(q->qdisc);
         q->qdisc = child;
     }
     q->limit = qopt->limit;
@@ -559,7 +564,8 @@ done:
     return err;
 }
 
-static int ftbf_init(struct Qdisc *sch, struct nlattr *opt)
+static int ftbf_init(struct Qdisc *sch, struct nlattr *opt,
+                     struct netlink_ext_ack *extack)
 {
     unsigned int i = 0;
     struct ftbf_sched_data *q = qdisc_priv(sch);
@@ -594,7 +600,7 @@ static int ftbf_init(struct Qdisc *sch, struct nlattr *opt)
 
     pr_info("init F-TBF.\n");
 
-    return ftbf_change(sch, opt);
+    return ftbf_change(sch, opt, extack);
 }
 
 static void ftbf_destroy(struct Qdisc *sch)
@@ -603,7 +609,7 @@ static void ftbf_destroy(struct Qdisc *sch)
     struct ftbf_sched_data *q = qdisc_priv(sch);
 
     qdisc_watchdog_cancel(&q->watchdog);
-    qdisc_destroy(q->qdisc);
+    qdisc_put(q->qdisc);
 
     for (i = 0; i < sketch_depth; ++i) {
         kfree(q->token_occupied_bytes[i]);
@@ -661,7 +667,7 @@ static int ftbf_dump_class(struct Qdisc *sch, unsigned long cl,
 }
 
 static int ftbf_graft(struct Qdisc *sch, unsigned long arg, struct Qdisc *new,
-             struct Qdisc **old)
+             struct Qdisc **old, struct netlink_ext_ack *extack)
 {
     struct ftbf_sched_data *q = qdisc_priv(sch);
 
