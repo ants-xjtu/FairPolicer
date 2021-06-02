@@ -5,11 +5,11 @@ FairPolicer is a network traffic policer
 that can fairly allocate bandwidth among contending flows
 regardless of their congestion control algorithms.
 
-Details of FairPolicer can be found at our paper "Towards the Fairness of Traffic Policer",
-which will be presented at INFOCOM'21.
+Details of FairPolicer can be found at our paper
+"Towards the Fairness of Traffic Policer", which was presented at INFOCOM'21.
 
 ## Requirements
-- Linux 4.15.0
+- Linux 5.4.0
 - Kernel headers
 
 ## How to use
@@ -38,3 +38,6 @@ tc qdisc add dev eth0 root tbf rate 10mbit burst 180kb limit 1600b
 ```
 This command enables FairPolicer at `eth0`, allowing 180KB traffic burst
 and throttling overall traffic rate to 10Mbps.
+
+## Contact
+If you have any questions, contact [Danfeng Shan](https://dfshan.github.io/).
